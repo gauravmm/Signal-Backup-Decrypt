@@ -1,3 +1,10 @@
+build/
+.gradle
+.vscode
+protobuf/*.py
+*.backup
+*.key
+
 # Compiled class file
 *.class
 
