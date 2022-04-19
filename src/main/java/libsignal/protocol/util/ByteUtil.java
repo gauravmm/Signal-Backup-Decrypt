@@ -3,7 +3,7 @@
  *
  * Licensed according to the LICENSE file in this repository.
  */
-package main.java.libsignal.protocol.util;
+package libsignal.protocol.util;
 
 import java.util.HexFormat;
 import java.io.ByteArrayOutputStream;
