@@ -19,12 +19,21 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.StringWriter;
+import java.lang.reflect.Array;
 import java.nio.file.Path;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
@@ -33,6 +42,11 @@ import javax.crypto.Mac;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+import javax.sql.StatementEvent;
+
+import org.codehaus.jackson.map.util.JSONPObject;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
 
 public class FullBackupImporter extends FullBackupBase {
 
@@ -76,7 +90,135 @@ public class FullBackupImporter extends FullBackupBase {
 	}
 
 	private static void processStatement(Exporter exporter, SqlStatement statement) {
-		exporter.writeAppendFile("statements.sql", statement.toString().getBytes());
+		if (statement.getStatement().startsWith("CREATE")) {
+			exporter.writeAppendFile("raw/_schema.sql", (statement.getStatement() + "\n").getBytes());
+			return;
+		}
+
+		// Prepare the parameters.
+		String[] parameters = new String[statement.getParametersCount()];
+		int i = 0;
+		for (SqlStatement.SqlParameter parameter : statement.getParametersList()) {
+			if (parameter.hasStringParamter())
+				parameters[i] = (parameter.getStringParamter());
+			else if (parameter.hasDoubleParameter())
+				parameters[i] = (Double.toString(parameter.getDoubleParameter()));
+			else if (parameter.hasIntegerParameter())
+				parameters[i] = (Long.toString(parameter.getIntegerParameter()));
+			else if (parameter.hasBlobParameter())
+				parameters[i] = (parameter.getBlobParameter().toByteArray().toString());
+			else if (parameter.hasNullparameter())
+				parameters[i] = ("");
+			i++;
+		}
+
+		if (statement.getStatement().startsWith("INSERT INTO part")) {
+			String[] mapKeys = { "_id", "mid", null, "ct", "name", null, null, null, null, null, null, null,
+					null, null, null, null, "file_name", null, null, "unique_id", null, null, "voice_note", null, null,
+					null, "height", null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+					null };
+			dumpJSONToFile(exporter.getFileStream("part.json"), mapKeys, parameters);
+
+		} else if (statement.getStatement().startsWith("INSERT INTO reaction")) {
+
+		} else if (statement.getStatement().startsWith("INSERT INTO sms")) {
+			String[] mapKeys = { "_id", "thread_id", null, null, "person", "date", null, null, null, null, null, "type",
+					null, null, null, "body", null, null, null, null, null, null, null, null, null, null, null,
+					"remote_deleted", null, null, null
+			};
+
+			Map<String, String> m = assembleMap(mapKeys, parameters);
+			OutputStream out = exporter.getFileStream(String.format("messages/thread_%3s.json", m.get("thread_id")));
+			try {
+				out.write((JSONObject.toJSONString(m) + "\n").getBytes());
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+
+		} else if (statement.getStatement().startsWith("INSERT INTO mms")) {
+			String[] mapKeys = { "_id", "thread_id", "date", null, null, null, "read", "body",
+					null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+					null, "quote_id", "quote_author", "quote_body", null, null, null, "shared_contacts",
+					null, null, null, null, null, null, null, null, null, null, null, null, null, null, null
+			};
+
+			Map<String, String> m = assembleMap(mapKeys, parameters);
+			OutputStream out = exporter.getFileStream(String.format("messages/thread_%3s.json", m.get("thread_id")));
+			try {
+				out.write((JSONObject.toJSONString(m) + "\n").getBytes());
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+
+		} else if (statement.getStatement().startsWith("INSERT INTO drafts")) {
+
+		} else if (statement.getStatement().startsWith("INSERT INTO push")) {
+
+		} else if (statement.getStatement().startsWith("INSERT INTO sticker")) {
+
+		} else if (statement.getStatement().startsWith("INSERT INTO recipient")) {
+
+		} else if (statement.getStatement().startsWith("INSERT INTO thread")) {
+
+		} else if (statement.getStatement().startsWith("INSERT INTO identities")) {
+
+		} else if (statement.getStatement().startsWith("INSERT INTO distribution_list")) {
+
+		} else if (statement.getStatement().startsWith("INSERT INTO msl_")) {
+			if (statement.getStatement().startsWith("INSERT INTO msl_payload")) {
+				String[] raw_keys = { "_id", "date_sent", "content", "content_hint" };
+				dumpJSONToFile(exporter.getFileStream("raw/msl_payload.json"), raw_keys, parameters);
+
+			} else if (statement.getStatement().startsWith("INSERT INTO msl_recipient")) {
+				String[] raw_keys = { "_id", "payload_id", "recipient_id", "device" };
+				dumpJSONToFile(exporter.getFileStream("raw/msl_recipient.json"), raw_keys, parameters);
+
+			} else if (statement.getStatement().startsWith("INSERT INTO msl_message")) {
+				String[] raw_keys = { "_id", "payload_id", "message_id", "is_mms" };
+				dumpJSONToFile(exporter.getFileStream("raw/msl_message.json"), raw_keys, parameters);
+
+			} else {
+				System.err.print("Statement skipped > ");
+				System.err.println(statement.getStatement());
+				exporter.writeAppendFile("statements_msl.bin", statement.toByteArray());
+			}
+
+		} else {
+			System.err.print("Statement skipped > ");
+			System.err.println(statement.getStatement());
+			exporter.writeAppendFile("statements.bin", statement.toByteArray());
+
+		}
+	}
+
+	private static Map<String, String> assembleMap(String[] keys, String[] values) {
+		Map<String, String> rv = new HashMap<>();
+		for (int i = 0; i < keys.length; ++i)
+			if (keys[i] != null)
+				rv.put(keys[i], values[i]);
+
+		// Special extra things:
+		if ("0".equals(rv.get("remote_deleted")))
+			rv.remove("remote_deleted");
+
+		String[] autoremoves = { "shared_contacts", "quote_id", "quote_author", "quote_body", "name", "file_name",
+				"voice_note" };
+		for (String autoremove : autoremoves)
+			if ("".equals(rv.get(autoremove)))
+				rv.remove(autoremove);
+
+		return rv;
+	}
+
+	private static void dumpJSONToFile(OutputStream out, String[] keys, String[] values) {
+		if (keys.length != values.length)
+			System.err.println("Incorrect number of parameters: " + values.toString());
+
+		try {
+			out.write((JSONObject.toJSONString(assembleMap(keys, values)) + "\n").getBytes());
+		} catch (IOException e) {
+			System.err.println("Error dumping to text: " + values.toString());
+		}
 	}
 
 	private static void processAttachment(Exporter exporter, Attachment attachment, BackupRecordInputStream inputStream)
@@ -90,6 +232,9 @@ public class FullBackupImporter extends FullBackupBase {
 			return;
 		}
 
+		if (!false)
+			return;
+
 		AttachmentMetadata am = exporter.writeFromBuffer("attachment",
 				String.format("att_%8d", attachment.getAttachmentId()), tmp.toByteArray());
 		System.err.println(String.format("Attachment > %s", am.path));
@@ -98,123 +243,25 @@ public class FullBackupImporter extends FullBackupBase {
 
 	private static void processSticker(Exporter exporter, Sticker sticker, BackupRecordInputStream inputStream)
 			throws IOException {
-		/*
-		 * File stickerDirectory = context.getDir(StickerDatabase.DIRECTORY,
-		 * Context.MODE_PRIVATE);
-		 * File dataFile = File.createTempFile("sticker", ".mms", stickerDirectory);
-		 * 
-		 * Pair<byte[], OutputStream> output =
-		 * ModernEncryptingPartOutputStream.createFor(attachmentSecret, dataFile,
-		 * false);
-		 * 
-		 * inputStream.readAttachmentTo(output.second, sticker.getLength());
-		 * 
-		 * ContentValues contentValues = new ContentValues();
-		 * contentValues.put(StickerDatabase.FILE_PATH, dataFile.getAbsolutePath());
-		 * contentValues.put(StickerDatabase.FILE_LENGTH, sticker.getLength());
-		 * contentValues.put(StickerDatabase.FILE_RANDOM, output.first);
-		 * 
-		 * db.update(StickerDatabase.TABLE_NAME, contentValues,
-		 * StickerDatabase._ID + " = ?",
-		 * new String[] { String.valueOf(sticker.getRowId()) });
-		 */
+
+		inputStream.readAttachmentTo(
+				exporter.writeOnceStream("sticker", String.format("sticker_%d.webp", sticker.getRowId())),
+				sticker.getLength());
+		System.err.println(String.format("Sticker > %d", sticker.getRowId()));
 	}
 
 	private static void processAvatar(Exporter exporter, BackupProtos.Avatar avatar,
 			BackupRecordInputStream inputStream)
 			throws IOException {
-		/*
-		 * if (avatar.hasRecipientId()) {
-		 * RecipientId recipientId = RecipientId.from(avatar.getRecipientId());
-		 * inputStream.readAttachmentTo(AvatarHelper.getOutputStream(context,
-		 * recipientId, false), avatar.getLength());
-		 * } else {
-		 * if (avatar.hasName() && SqlUtil.tableExists(db, "recipient_preferences")) {
-		 * Log.w(TAG,
-		 * "Avatar is missing a recipientId. Clearing signal_profile_avatar (legacy) so it can be fetched later."
-		 * );
-		 * db.
-		 * execSQL("UPDATE recipient_preferences SET signal_profile_avatar = NULL WHERE recipient_ids = ?"
-		 * ,
-		 * new String[] { avatar.getName() });
-		 * } else if (avatar.hasName() && SqlUtil.tableExists(db, "recipient")) {
-		 * Log.w(TAG,
-		 * "Avatar is missing a recipientId. Clearing signal_profile_avatar so it can be fetched later."
-		 * );
-		 * db.
-		 * execSQL("UPDATE recipient SET signal_profile_avatar = NULL WHERE phone = ?",
-		 * new String[] { avatar.getName() });
-		 * } else {
-		 * Log.w(TAG, "Avatar is missing a recipientId. Skipping avatar restore.");
-		 * }
-		 * 
-		 * inputStream.readAttachmentTo(new ByteArrayOutputStream(),
-		 * avatar.getLength());
-		 * }
-		 */
+		return;
 	}
 
 	private static void processKeyValue(Exporter exporter, BackupProtos.KeyValue keyValue) {
-		/*
-		 * KeyValueDataSet dataSet = new KeyValueDataSet();
-		 * 
-		 * if (keyValue.hasBlobValue()) {
-		 * dataSet.putBlob(keyValue.getKey(), keyValue.getBlobValue().toByteArray());
-		 * } else if (keyValue.hasBooleanValue()) {
-		 * dataSet.putBoolean(keyValue.getKey(), keyValue.getBooleanValue());
-		 * } else if (keyValue.hasFloatValue()) {
-		 * dataSet.putFloat(keyValue.getKey(), keyValue.getFloatValue());
-		 * } else if (keyValue.hasIntegerValue()) {
-		 * dataSet.putInteger(keyValue.getKey(), keyValue.getIntegerValue());
-		 * } else if (keyValue.hasLongValue()) {
-		 * dataSet.putLong(keyValue.getKey(), keyValue.getLongValue());
-		 * } else if (keyValue.hasStringValue()) {
-		 * dataSet.putString(keyValue.getKey(), keyValue.getStringValue());
-		 * } else {
-		 * Log.i(TAG, "Unknown KeyValue backup value, skipping");
-		 * return;
-		 * }
-		 * 
-		 * KeyValueDatabase.getInstance(ApplicationDependencies.getApplication()).
-		 * writeDataSet(dataSet,
-		 * Collections.emptyList());
-		 */
+		exporter.writeAppendFile("keyValue.txt", keyValue.toString().getBytes());
 	}
 
 	private static void processPreference(Exporter exporter, SharedPreference preference) {
-		/*
-		 * SharedPreferences preferences =
-		 * context.getSharedPreferences(preference.getFile(), 0);
-		 * 
-		 * // Identity keys were moved from shared prefs into SignalStore. Need to
-		 * handle
-		 * // importing backups made before the migration.
-		 * if ("SecureSMS-Preferences".equals(preference.getFile())) {
-		 * if ("pref_identity_public_v3".equals(preference.getKey()) &&
-		 * preference.hasValue()) {
-		 * SignalStore.account().restoreLegacyIdentityPublicKeyFromBackup(preference.
-		 * getValue());
-		 * } else if ("pref_identity_private_v3".equals(preference.getKey()) &&
-		 * preference.hasValue()) {
-		 * SignalStore.account().restoreLegacyIdentityPrivateKeyFromBackup(preference.
-		 * getValue());
-		 * }
-		 * 
-		 * return;
-		 * }
-		 * 
-		 * if (preference.hasValue()) {
-		 * preferences.edit().putString(preference.getKey(),
-		 * preference.getValue()).commit();
-		 * } else if (preference.hasBooleanValue()) {
-		 * preferences.edit().putBoolean(preference.getKey(),
-		 * preference.getBooleanValue()).commit();
-		 * } else if (preference.hasIsStringSetValue() &&
-		 * preference.getIsStringSetValue()) {
-		 * preferences.edit().putStringSet(preference.getKey(), new
-		 * HashSet<>(preference.getStringSetValueList())).commit();
-		 * }
-		 */
+		exporter.writeAppendFile("preferences.txt", preference.toString().getBytes());
 	}
 
 	private static class BackupRecordInputStream extends BackupStream {

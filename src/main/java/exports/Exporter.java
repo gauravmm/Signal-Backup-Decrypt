@@ -20,7 +20,6 @@ import net.sf.jmimemagic.MagicMatch;
 import net.sf.jmimemagic.MagicMatchNotFoundException;
 import net.sf.jmimemagic.MagicParseException;
 
-
 public class Exporter implements Closeable, Flushable {
     private Map<String, OutputStream> openAppendFiles = new HashMap<>();
     private Path outdir;
@@ -43,17 +42,15 @@ public class Exporter implements Closeable, Flushable {
         this.outdir = outdir;
     }
 
-    public OutputStream writeOnceStream(Path fpath)
+    private OutputStream writeOnceStream(Path fpath)
             throws IOException {
-        Path parentdir = fpath.getParent();
-        if (Files.notExists(parentdir))
-            try {
-                Files.createDirectories(parentdir);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-
+        Files.createDirectories(fpath.getParent());
         return Files.newOutputStream(fpath, StandardOpenOption.CREATE);
+    }
+
+    public OutputStream writeOnceStream(String type, String fname)
+            throws IOException {
+        return writeOnceStream(this.outdir.resolve(type).resolve(fname));
     }
 
     public AttachmentMetadata writeFromBuffer(String type, String basename, byte[] filedata)
@@ -67,7 +64,7 @@ public class Exporter implements Closeable, Flushable {
             if (mm.getExtension() == "") {
                 if (am.mimetype == "image/gif")
                     ext = ".gif";
-                else 
+                else
                     System.err.println(String.format("No extension for %s", am.mimetype));
             } else {
                 ext = "." + mm.getExtension();
@@ -86,26 +83,33 @@ public class Exporter implements Closeable, Flushable {
         return am;
     }
 
-    public void writeAppendFile(String filename, byte[] data) {
-        if (!this.openAppendFiles.containsKey(filename)) {
+    public OutputStream getFileStream(String filename) {
+        OutputStream os = this.openAppendFiles.get(filename);
+
+        if (os == null) {
             Path fileout = this.outdir.resolve(filename);
             try {
-                OutputStream os = Files.newOutputStream(fileout, StandardOpenOption.CREATE);
+                // Ensure parent directory exists:
+                Files.createDirectories(fileout.getParent());
+                os = Files.newOutputStream(fileout, StandardOpenOption.CREATE);
                 this.openAppendFiles.put(filename, os);
+
+                return os;
             } catch (IOException e) {
                 System.err.println(e);
-                System.exit(1);
             }
         }
 
-        OutputStream os = this.openAppendFiles.get(filename);
         assert os != null;
+        return os;
+    }
 
+    public void writeAppendFile(String filename, byte[] data) {
+        OutputStream os = this.getFileStream(filename);
         try {
             os.write(data);
         } catch (IOException e) {
             System.err.println(e);
-            System.exit(1);
         }
     }
 
