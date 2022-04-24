@@ -49,13 +49,14 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 
 public class FullBackupImporter extends FullBackupBase {
+	private boolean dump_raw;
 
-	public static void importFile(String file, String passphrase, Path outdir) throws IOException {
+	public static void importFile(String file, String passphrase, Path outdir, Boolean dump_raw) throws IOException {
 		InputStream is = new FileInputStream(new File(Objects.requireNonNull(file)));
-		importFile(is, passphrase, outdir);
+		importFile(is, passphrase, outdir, dump_raw);
 	}
 
-	public static void importFile(InputStream is, String passphrase, Path outdir) throws IOException {
+	public static void importFile(InputStream is, String passphrase, Path outdir, Boolean dump_raw) throws IOException {
 		int count = 0;
 
 		Exporter exporter = new Exporter(outdir, true);
@@ -71,17 +72,17 @@ public class FullBackupImporter extends FullBackupBase {
 
 			if (frame.hasVersion())
 				continue;
-			else if (frame.hasStatement())
-				processStatement(exporter, frame.getStatement());
-			else if (frame.hasPreference())
-				processPreference(exporter, frame.getPreference());
 			else if (frame.hasAttachment())
 				processAttachment(exporter, frame.getAttachment(), inputStream);
-			else if (frame.hasSticker())
+			else if (frame.hasStatement())
+				processStatement(exporter, frame.getStatement(), dump_raw);
+			else if (dump_raw && frame.hasPreference())
+				processPreference(exporter, frame.getPreference());
+			else if (dump_raw && frame.hasSticker())
 				processSticker(exporter, frame.getSticker(), inputStream);
-			else if (frame.hasAvatar())
+			else if (dump_raw && frame.hasAvatar())
 				processAvatar(exporter, frame.getAvatar(), inputStream);
-			else if (frame.hasKeyValue())
+			else if (dump_raw && frame.hasKeyValue())
 				processKeyValue(exporter, frame.getKeyValue());
 			else
 				count--;
@@ -89,9 +90,10 @@ public class FullBackupImporter extends FullBackupBase {
 
 	}
 
-	private static void processStatement(Exporter exporter, SqlStatement statement) {
+	private static void processStatement(Exporter exporter, SqlStatement statement, Boolean dump_raw) {
 		if (statement.getStatement().startsWith("CREATE")) {
-			exporter.writeAppendFile("raw/_schema.sql", (statement.getStatement() + "\n").getBytes());
+			if (dump_raw)
+				exporter.writeAppendFile("raw/_schema.sql", (statement.getStatement() + "\n").getBytes());
 			return;
 		}
 
@@ -117,9 +119,32 @@ public class FullBackupImporter extends FullBackupBase {
 					null, null, null, null, "file_name", null, null, "unique_id", null, null, "voice_note", null, null,
 					null, "height", null, null, null, null, null, null, null, null, null, null, null, null, null, null,
 					null };
-			dumpJSONToFile(exporter.getFileStream("part.json"), mapKeys, parameters);
+
+			Map<String, String> m = assembleMap(mapKeys, parameters);
+
+			if (dump_raw) {
+				OutputStream out = exporter
+						.getFileStream("raw/part.json");
+				try {
+					out.write((JSONObject.toJSONString(m) + "\n").getBytes());
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
 
 		} else if (statement.getStatement().startsWith("INSERT INTO reaction")) {
+			String[] mapKeys = { "_id", "message_id", "is_mms", "author_id", "emoji", "date_sent", "date_received" };
+
+			Map<String, String> m = assembleMap(mapKeys, parameters);
+			if (dump_raw) {
+				OutputStream out = exporter
+						.getFileStream("raw/messages/reaction.json");
+				try {
+					out.write((JSONObject.toJSONString(m) + "\n").getBytes());
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
 
 		} else if (statement.getStatement().startsWith("INSERT INTO sms")) {
 			String[] mapKeys = { "_id", "thread_id", null, null, "person", "date", null, null, null, null, null, "type",
@@ -128,29 +153,41 @@ public class FullBackupImporter extends FullBackupBase {
 			};
 
 			Map<String, String> m = assembleMap(mapKeys, parameters);
-			OutputStream out = exporter.getFileStream(String.format("messages/thread_%3s.json", m.get("thread_id")));
-			try {
-				out.write((JSONObject.toJSONString(m) + "\n").getBytes());
-			} catch (IOException e) {
-				e.printStackTrace();
+			if (dump_raw) {
+				OutputStream out = exporter
+						.getFileStream(String.format("raw/messages/thread_%3s.json", m.get("thread_id")));
+				try {
+					out.write((JSONObject.toJSONString(m) + "\n").getBytes());
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
 			}
 
 		} else if (statement.getStatement().startsWith("INSERT INTO mms")) {
 			String[] mapKeys = { "_id", "thread_id", "date", null, null, null, "read", "body",
 					null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-					null, "quote_id", "quote_author", "quote_body", null, null, null, "shared_contacts",
+					null, "quote_id", "quote_author", "quote_body", null, null, null, null,
 					null, null, null, null, null, null, null, null, null, null, null, null, null, null, null
 			};
 
 			Map<String, String> m = assembleMap(mapKeys, parameters);
-			OutputStream out = exporter.getFileStream(String.format("messages/thread_%3s.json", m.get("thread_id")));
-			try {
-				out.write((JSONObject.toJSONString(m) + "\n").getBytes());
-			} catch (IOException e) {
-				e.printStackTrace();
+			if (dump_raw) {
+				OutputStream out = exporter
+						.getFileStream(String.format("raw/messages/thread_%3s.json", m.get("thread_id")));
+				try {
+					out.write((JSONObject.toJSONString(m) + "\n").getBytes());
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
 			}
 
-		} else if (statement.getStatement().startsWith("INSERT INTO drafts")) {
+		}
+
+		// The remaining tables are only to be processed if dump_raw is set
+		if (!dump_raw)
+			return;
+
+		if (statement.getStatement().startsWith("INSERT INTO drafts")) {
 
 		} else if (statement.getStatement().startsWith("INSERT INTO push")) {
 
@@ -198,12 +235,14 @@ public class FullBackupImporter extends FullBackupBase {
 				rv.put(keys[i], values[i]);
 
 		// Special extra things:
-		if ("0".equals(rv.get("remote_deleted")))
-			rv.remove("remote_deleted");
+		String[] autoremoves_zero = { "remote_deleted", "quote_id" };
+		for (String autoremove : autoremoves_zero)
+			if ("0".equals(rv.get(autoremove)))
+				rv.remove(autoremove);
 
-		String[] autoremoves = { "shared_contacts", "quote_id", "quote_author", "quote_body", "name", "file_name",
+		String[] autoremoves_empty = { "shared_contacts", "quote_author", "quote_body", "name", "file_name",
 				"voice_note" };
-		for (String autoremove : autoremoves)
+		for (String autoremove : autoremoves_empty)
 			if ("".equals(rv.get(autoremove)))
 				rv.remove(autoremove);
 
@@ -223,22 +262,16 @@ public class FullBackupImporter extends FullBackupBase {
 
 	private static void processAttachment(Exporter exporter, Attachment attachment, BackupRecordInputStream inputStream)
 			throws IOException {
-		// Decrypt it:
-		ByteArrayOutputStream tmp = new ByteArrayOutputStream();
+		if (!true)
+			return;
 		try {
-			inputStream.readAttachmentTo(tmp, attachment.getLength());
+			inputStream.readAttachmentTo(
+					exporter.writeOnceStream("raw/attachments", Long.toString(attachment.getAttachmentId())),
+					attachment.getLength());
 		} catch (BadMacException e) {
 			System.err.println("Bad MAC for attachment " + attachment.getAttachmentId() + "! Can't restore it.");
 			return;
 		}
-
-		if (!false)
-			return;
-
-		AttachmentMetadata am = exporter.writeFromBuffer("attachment",
-				String.format("att_%8d", attachment.getAttachmentId()), tmp.toByteArray());
-		System.err.println(String.format("Attachment > %s", am.path));
-
 	}
 
 	private static void processSticker(Exporter exporter, Sticker sticker, BackupRecordInputStream inputStream)
@@ -247,7 +280,7 @@ public class FullBackupImporter extends FullBackupBase {
 		inputStream.readAttachmentTo(
 				exporter.writeOnceStream("sticker", String.format("sticker_%d.webp", sticker.getRowId())),
 				sticker.getLength());
-		System.err.println(String.format("Sticker > %d", sticker.getRowId()));
+		// System.err.println(String.format("Sticker > %d", sticker.getRowId()));
 	}
 
 	private static void processAvatar(Exporter exporter, BackupProtos.Avatar avatar,
@@ -257,11 +290,11 @@ public class FullBackupImporter extends FullBackupBase {
 	}
 
 	private static void processKeyValue(Exporter exporter, BackupProtos.KeyValue keyValue) {
-		exporter.writeAppendFile("keyValue.txt", keyValue.toString().getBytes());
+		exporter.writeAppendFile("raw/keyValue.txt", keyValue.toString().getBytes());
 	}
 
 	private static void processPreference(Exporter exporter, SharedPreference preference) {
-		exporter.writeAppendFile("preferences.txt", preference.toString().getBytes());
+		exporter.writeAppendFile("raw/preferences.txt", preference.toString().getBytes());
 	}
 
 	private static class BackupRecordInputStream extends BackupStream {

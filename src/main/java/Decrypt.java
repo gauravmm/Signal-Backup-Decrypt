@@ -22,6 +22,8 @@ public class Decrypt {
     parser.addArgument("file").type(String.class);
     parser.addArgument("key").type(String.class);
     parser.addArgument("--output-dir").type(String.class).setDefault("out");
+    parser.addArgument("--dump-raw").type(Boolean.class).setDefault(false);
+
     Namespace ns = null;
 
     try {
@@ -30,7 +32,7 @@ public class Decrypt {
       Path outdir = Paths.get(ns.getString("output_dir"));
 
       try {
-        FullBackupImporter.importFile(ns.getString("file"), ns.getString("key"), outdir);
+        FullBackupImporter.importFile(ns.getString("file"), ns.getString("key"), outdir, ns.getBoolean("dump_raw"));
 
       } catch (IOException e) {
         System.err.println(e);
