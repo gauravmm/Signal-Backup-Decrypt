@@ -12,6 +12,7 @@ import securesms.backup.BackupProtos.BackupFrame;
 import securesms.backup.BackupProtos.SharedPreference;
 import securesms.backup.BackupProtos.SqlStatement;
 import securesms.backup.BackupProtos.Sticker;
+import securesms.util.ReactionKey;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -32,6 +33,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BiFunction;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -60,6 +62,7 @@ public class FullBackupImporter extends FullBackupBase {
 		int count = 0;
 
 		Exporter exporter = new Exporter(outdir, true);
+		BackupDump dump = new BackupDump();
 		BackupRecordInputStream inputStream = new BackupRecordInputStream(is, passphrase);
 
 		BackupFrame frame;
@@ -75,7 +78,7 @@ public class FullBackupImporter extends FullBackupBase {
 			else if (frame.hasAttachment())
 				processAttachment(exporter, frame.getAttachment(), inputStream);
 			else if (frame.hasStatement())
-				processStatement(exporter, frame.getStatement(), dump_raw);
+				processStatement(exporter, dump, frame.getStatement(), dump_raw);
 			else if (dump_raw && frame.hasPreference())
 				processPreference(exporter, frame.getPreference());
 			else if (dump_raw && frame.hasSticker())
@@ -90,7 +93,7 @@ public class FullBackupImporter extends FullBackupBase {
 
 	}
 
-	private static void processStatement(Exporter exporter, SqlStatement statement, Boolean dump_raw) {
+	private static void processStatement(Exporter exporter, BackupDump dump, SqlStatement statement, Boolean dump_raw) {
 		if (statement.getStatement().startsWith("CREATE")) {
 			if (dump_raw)
 				exporter.writeAppendFile("raw/_schema.sql", (statement.getStatement() + "\n").getBytes());
@@ -121,6 +124,7 @@ public class FullBackupImporter extends FullBackupBase {
 					null };
 
 			Map<String, String> m = assembleMap(mapKeys, parameters);
+			dump.part.put(m.get("mid"), m);
 
 			if (dump_raw) {
 				OutputStream out = exporter
@@ -136,6 +140,18 @@ public class FullBackupImporter extends FullBackupBase {
 			String[] mapKeys = { "_id", "message_id", "is_mms", "author_id", "emoji", "date_sent", "date_received" };
 
 			Map<String, String> m = assembleMap(mapKeys, parameters);
+			ReactionKey rk = new ReactionKey("1".equals(m.get("is_mms")), m.get("message_id"));
+
+			// Create list if one does not exist:
+			List<Map<String, String>> reactlist = dump.reaction.get(rk);
+			if (reactlist == null) {
+				reactlist = new LinkedList<Map<String, String>>();
+				reactlist.add(m);
+				dump.reaction.put(rk, reactlist);
+			} else {
+				reactlist.add(m);
+			}
+
 			if (dump_raw) {
 				OutputStream out = exporter
 						.getFileStream("raw/messages/reaction.json");
@@ -153,6 +169,9 @@ public class FullBackupImporter extends FullBackupBase {
 			};
 
 			Map<String, String> m = assembleMap(mapKeys, parameters);
+			m.put("is_mms", "0");
+			dump.messages.add(m);
+
 			if (dump_raw) {
 				OutputStream out = exporter
 						.getFileStream(String.format("raw/messages/thread_%3s.json", m.get("thread_id")));
@@ -167,10 +186,13 @@ public class FullBackupImporter extends FullBackupBase {
 			String[] mapKeys = { "_id", "thread_id", "date", null, null, null, "read", "body",
 					null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
 					null, "quote_id", "quote_author", "quote_body", null, null, null, null,
-					null, null, null, null, null, null, null, null, null, null, null, null, null, null, null
+					null, null, null, null, null, null, "remote_deleted", null, null, null, null, null, null, null, null
 			};
 
 			Map<String, String> m = assembleMap(mapKeys, parameters);
+			m.put("is_mms", "1");
+			dump.messages.add(m);
+
 			if (dump_raw) {
 				OutputStream out = exporter
 						.getFileStream(String.format("raw/messages/thread_%3s.json", m.get("thread_id")));
@@ -181,50 +203,51 @@ public class FullBackupImporter extends FullBackupBase {
 				}
 			}
 
-		}
+		} else {
 
-		// The remaining tables are only to be processed if dump_raw is set
-		if (!dump_raw)
-			return;
+			// The remaining tables are only to be processed if dump_raw is set
+			if (!dump_raw)
+				return;
 
-		if (statement.getStatement().startsWith("INSERT INTO drafts")) {
+			if (statement.getStatement().startsWith("INSERT INTO drafts")) {
 
-		} else if (statement.getStatement().startsWith("INSERT INTO push")) {
+			} else if (statement.getStatement().startsWith("INSERT INTO push")) {
 
-		} else if (statement.getStatement().startsWith("INSERT INTO sticker")) {
+			} else if (statement.getStatement().startsWith("INSERT INTO sticker")) {
 
-		} else if (statement.getStatement().startsWith("INSERT INTO recipient")) {
+			} else if (statement.getStatement().startsWith("INSERT INTO recipient")) {
 
-		} else if (statement.getStatement().startsWith("INSERT INTO thread")) {
+			} else if (statement.getStatement().startsWith("INSERT INTO thread")) {
 
-		} else if (statement.getStatement().startsWith("INSERT INTO identities")) {
+			} else if (statement.getStatement().startsWith("INSERT INTO identities")) {
 
-		} else if (statement.getStatement().startsWith("INSERT INTO distribution_list")) {
+			} else if (statement.getStatement().startsWith("INSERT INTO distribution_list")) {
 
-		} else if (statement.getStatement().startsWith("INSERT INTO msl_")) {
-			if (statement.getStatement().startsWith("INSERT INTO msl_payload")) {
-				String[] raw_keys = { "_id", "date_sent", "content", "content_hint" };
-				dumpJSONToFile(exporter.getFileStream("raw/msl_payload.json"), raw_keys, parameters);
+			} else if (statement.getStatement().startsWith("INSERT INTO msl_")) {
+				if (statement.getStatement().startsWith("INSERT INTO msl_payload")) {
+					String[] raw_keys = { "_id", "date_sent", "content", "content_hint" };
+					dumpJSONToFile(exporter.getFileStream("raw/msl_payload.json"), raw_keys, parameters);
 
-			} else if (statement.getStatement().startsWith("INSERT INTO msl_recipient")) {
-				String[] raw_keys = { "_id", "payload_id", "recipient_id", "device" };
-				dumpJSONToFile(exporter.getFileStream("raw/msl_recipient.json"), raw_keys, parameters);
+				} else if (statement.getStatement().startsWith("INSERT INTO msl_recipient")) {
+					String[] raw_keys = { "_id", "payload_id", "recipient_id", "device" };
+					dumpJSONToFile(exporter.getFileStream("raw/msl_recipient.json"), raw_keys, parameters);
 
-			} else if (statement.getStatement().startsWith("INSERT INTO msl_message")) {
-				String[] raw_keys = { "_id", "payload_id", "message_id", "is_mms" };
-				dumpJSONToFile(exporter.getFileStream("raw/msl_message.json"), raw_keys, parameters);
+				} else if (statement.getStatement().startsWith("INSERT INTO msl_message")) {
+					String[] raw_keys = { "_id", "payload_id", "message_id", "is_mms" };
+					dumpJSONToFile(exporter.getFileStream("raw/msl_message.json"), raw_keys, parameters);
+
+				} else {
+					System.err.print("Statement skipped > ");
+					System.err.println(statement.getStatement());
+					exporter.writeAppendFile("statements_msl.bin", statement.toByteArray());
+				}
 
 			} else {
 				System.err.print("Statement skipped > ");
 				System.err.println(statement.getStatement());
-				exporter.writeAppendFile("statements_msl.bin", statement.toByteArray());
+				exporter.writeAppendFile("statements.bin", statement.toByteArray());
+
 			}
-
-		} else {
-			System.err.print("Statement skipped > ");
-			System.err.println(statement.getStatement());
-			exporter.writeAppendFile("statements.bin", statement.toByteArray());
-
 		}
 	}
 
@@ -262,8 +285,12 @@ public class FullBackupImporter extends FullBackupBase {
 
 	private static void processAttachment(Exporter exporter, Attachment attachment, BackupRecordInputStream inputStream)
 			throws IOException {
-		if (!true)
+		if (true) {
+			inputStream.readAttachmentTo(
+					new ByteArrayOutputStream(),
+					attachment.getLength());
 			return;
+		}
 		try {
 			inputStream.readAttachmentTo(
 					exporter.writeOnceStream("raw/attachments", Long.toString(attachment.getAttachmentId())),

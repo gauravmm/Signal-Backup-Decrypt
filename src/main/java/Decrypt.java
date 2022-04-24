@@ -16,13 +16,11 @@ public class Decrypt {
     ArgumentParser parser = ArgumentParsers.newFor("Decrypt Signal Backups").build()
         .defaultHelp(true)
         .description("Decrypt Signal messenger backups.");
-    parser.addArgument("-v", "--verbose")
-        .action(Arguments.storeTrue())
-        .help("Be verbose");
+    parser.addArgument("-v", "--verbose").action(Arguments.storeTrue()).help("Be verbose");
+    parser.addArgument("--dump-raw", "-r").action(Arguments.storeTrue()).help("Dump raw objects read as JSON.");
     parser.addArgument("file").type(String.class);
     parser.addArgument("key").type(String.class);
     parser.addArgument("--output-dir").type(String.class).setDefault("out");
-    parser.addArgument("--dump-raw").type(Boolean.class).setDefault(false);
 
     Namespace ns = null;
 
