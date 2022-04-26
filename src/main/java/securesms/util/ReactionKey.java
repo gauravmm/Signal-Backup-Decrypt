@@ -2,9 +2,9 @@ package securesms.util;
 
 public class ReactionKey {
     public boolean is_mms;
-    public String message_id;
+    public Integer message_id;
 
-    public ReactionKey(boolean is_mms, String message_id) {
+    public ReactionKey(boolean is_mms, Integer message_id) {
         this.is_mms = is_mms;
         this.message_id = message_id;
     }

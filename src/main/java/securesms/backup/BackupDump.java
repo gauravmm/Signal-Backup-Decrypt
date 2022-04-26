@@ -38,9 +38,23 @@ public class BackupDump {
             // Get the message ID:
             int message_id = Integer.parseInt(m.remove("_id"));
 
+            // Handle quotes:
+            String quote_author = m.remove("quote_author");
+            String quote_id = m.remove("quote_id");
+            String quote_body = m.remove("quote_body");
+
             // Prepare output
             JSONObject out = new JSONObject(m);
 
+            // Handle quotes:
+            if (quote_id != null) {
+                Map<String, String> quote = new HashMap<>();
+                quote.put("author", quote_author);
+                quote.put("body", quote_body);
+                out.put("quote", quote);
+            }
+
+            // Handle attachments
             if (is_mms) {
                 Map<String, String> media = this.part.remove(message_id);
                 // If there is any media, then handle it:
@@ -50,6 +64,22 @@ public class BackupDump {
                     if (media_merge != null)
                         out.put("attachment", media_merge);
                 }
+            }
+
+            // Handle reactions:
+            ReactionKey ref = new ReactionKey(is_mms, message_id);
+            List<Map<String, String>> reactions = this.reaction.remove(ref);
+            if (reactions != null) {
+                // Handle reactions
+                List<Map<String, String>> message_reacts = new LinkedList<>();
+                for (Map<String, String> r : reactions) {
+                    Map<String, String> each_reaction = new HashMap<>();
+                    each_reaction.put("author", r.get("author_id"));
+                    each_reaction.put("emoji", r.get("emoji"));
+                    each_reaction.put("date", r.get("date_sent"));
+                    message_reacts.add(each_reaction);
+                }
+                out.put("reactions", message_reacts);
             }
 
             // Insert in thread data
@@ -66,7 +96,8 @@ public class BackupDump {
         output.forEach((t, l) -> {
             try {
                 Path messageFile = this.getThreadDir(outdir, t).resolve("_messages.json");
-                BufferedWriter writer = Files.newBufferedWriter(messageFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                BufferedWriter writer = Files.newBufferedWriter(messageFile, StandardOpenOption.CREATE,
+                        StandardOpenOption.WRITE);
                 JSONArray.writeJSONString(l, writer);
                 writer.close();
             } catch (IOException e) {
@@ -113,7 +144,8 @@ public class BackupDump {
         try {
             Files.move(attdir.resolve(media.get("unique_id")), threaddir.resolve(filename));
         } catch (IOException e) {
-            System.err.println("Cannot move attachment " + media.get("unique_id") + " to " + threaddir.resolve(filename));
+            System.err
+                    .println("Cannot move attachment " + media.get("unique_id") + " to " + threaddir.resolve(filename));
             System.err.println(e);
             error = "Missing file";
         }

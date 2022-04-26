@@ -142,7 +142,7 @@ public class FullBackupImporter extends FullBackupBase {
 			String[] mapKeys = { "_id", "message_id", "is_mms", "author_id", "emoji", "date_sent", "date_received" };
 
 			Map<String, String> m = assembleMap(mapKeys, parameters);
-			ReactionKey rk = new ReactionKey("1".equals(m.get("is_mms")), m.get("message_id"));
+			ReactionKey rk = new ReactionKey("1".equals(m.get("is_mms")), Integer.parseInt(m.get("message_id")));
 
 			// Create list if one does not exist:
 			List<Map<String, String>> reactlist = dump.reaction.get(rk);
@@ -185,7 +185,7 @@ public class FullBackupImporter extends FullBackupBase {
 			}
 
 		} else if (statement.getStatement().startsWith("INSERT INTO mms")) {
-			String[] mapKeys = { "_id", "thread_id", "date", null, null, null, "read", "body",
+			String[] mapKeys = { "_id", "thread_id", "date", null, null, null, null, "body",
 					null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
 					null, "quote_id", "quote_author", "quote_body", null, null, null, null,
 					null, null, null, null, null, null, "remote_deleted", null, null, null, null, null, null, null, null
