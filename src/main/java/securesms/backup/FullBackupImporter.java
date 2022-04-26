@@ -55,33 +55,44 @@ public class FullBackupImporter extends FullBackupBase {
 		BackupDump dump = new BackupDump();
 		BackupRecordInputStream inputStream = new BackupRecordInputStream(is, passphrase);
 
-		BackupFrame frame;
+		try {
+			BackupFrame frame;
+			while (!(frame = inputStream.readFrame()).getEnd()) {
+				count++;
 
-		while (!(frame = inputStream.readFrame()).getEnd()) {
-			count++;
+				if (count % 1000 == 0)
+					System.err.println(String.format("FRAME\t %d", count));
 
-			if (count % 1000 == 0)
-				System.err.println(String.format("FRAME\t %d", count));
+				if (frame.hasVersion())
+					continue;
+				else if (frame.hasAttachment())
+					processAttachment(exporter, frame.getAttachment(), inputStream);
+				else if (frame.hasStatement())
+					processStatement(exporter, dump, frame.getStatement(), dump_raw);
+				else if (dump_raw && frame.hasPreference())
+					processPreference(exporter, frame.getPreference());
+				else if (dump_raw && frame.hasSticker())
+					processSticker(exporter, frame.getSticker(), inputStream);
+				else if (dump_raw && frame.hasAvatar())
+					processAvatar(exporter, frame.getAvatar(), inputStream);
+				else if (dump_raw && frame.hasKeyValue())
+					processKeyValue(exporter, frame.getKeyValue());
+				else
+					count--;
+			}
 
-			if (frame.hasVersion())
-				continue;
-			else if (frame.hasAttachment())
-				processAttachment(exporter, frame.getAttachment(), inputStream);
-			else if (frame.hasStatement())
-				processStatement(exporter, dump, frame.getStatement(), dump_raw);
-			else if (dump_raw && frame.hasPreference())
-				processPreference(exporter, frame.getPreference());
-			else if (dump_raw && frame.hasSticker())
-				processSticker(exporter, frame.getSticker(), inputStream);
-			else if (dump_raw && frame.hasAvatar())
-				processAvatar(exporter, frame.getAvatar(), inputStream);
-			else if (dump_raw && frame.hasKeyValue())
-				processKeyValue(exporter, frame.getKeyValue());
-			else
-				count--;
+		} catch (RuntimeException e) {
+			System.err.println(e);
+			System.err.println("Abandoning extraction due to exception, finalizing now...");
+
 		}
 
-		// finalizeBackup();
+		try {
+			dump.finalizeBackup(outdir.resolve("raw").resolve("attachments"), outdir.resolve("messages"));
+		} catch (IOException e) {
+			System.err.println("Error finalizing backup.");
+			e.printStackTrace();
+		}
 	}
 
 	private static void processStatement(Exporter exporter, BackupDump dump, SqlStatement statement, Boolean dump_raw) {
@@ -111,11 +122,11 @@ public class FullBackupImporter extends FullBackupBase {
 		if (statement.getStatement().startsWith("INSERT INTO part")) {
 			String[] mapKeys = { "_id", "mid", null, "ct", "name", null, null, null, null, null, null, null,
 					null, null, null, null, "file_name", null, null, "unique_id", null, null, "voice_note", null, null,
-					null, "height", null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+					null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
 					null };
 
 			Map<String, String> m = assembleMap(mapKeys, parameters);
-			dump.part.put(m.get("mid"), m);
+			dump.part.put(Integer.parseInt(m.get("mid")), m);
 
 			if (dump_raw) {
 				OutputStream out = exporter
@@ -160,7 +171,7 @@ public class FullBackupImporter extends FullBackupBase {
 			};
 
 			Map<String, String> m = assembleMap(mapKeys, parameters);
-			m.put("is_mms", "0");
+			// m.put("is_mms", "0");
 			dump.messages.add(m);
 
 			if (dump_raw) {
@@ -249,13 +260,12 @@ public class FullBackupImporter extends FullBackupBase {
 				rv.put(keys[i], values[i]);
 
 		// Special extra things:
-		String[] autoremoves_zero = { "remote_deleted", "quote_id" };
+		String[] autoremoves_zero = { "remote_deleted", "quote_id", "voice_note" };
 		for (String autoremove : autoremoves_zero)
 			if ("0".equals(rv.get(autoremove)))
 				rv.remove(autoremove);
 
-		String[] autoremoves_empty = { "shared_contacts", "quote_author", "quote_body", "name", "file_name",
-				"voice_note" };
+		String[] autoremoves_empty = { "shared_contacts", "quote_author", "quote_body", "name", "file_name" };
 		for (String autoremove : autoremoves_empty)
 			if ("".equals(rv.get(autoremove)))
 				rv.remove(autoremove);
@@ -424,7 +434,8 @@ public class FullBackupImporter extends FullBackupBase {
 
 				int framelen = Conversions.byteArrayToInt(length);
 				if (framelen < 0)
-					throw new AssertionError("Negative frame length: " + framelen + ". Remaining bytes: " + in.available());
+					throw new RuntimeException(
+							"Negative frame length: " + framelen + ". Remaining bytes: " + in.available());
 
 				byte[] frame = new byte[framelen];
 				StreamUtil.readFully(in, frame);
