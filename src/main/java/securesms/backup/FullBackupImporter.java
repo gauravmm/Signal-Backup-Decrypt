@@ -1,6 +1,5 @@
 package securesms.backup;
 
-import exports.AttachmentMetadata;
 import exports.Exporter;
 
 import core.util.Conversions;
@@ -20,22 +19,16 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.StringWriter;
-import java.lang.reflect.Array;
 import java.nio.file.Path;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.BiFunction;
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
@@ -44,10 +37,7 @@ import javax.crypto.Mac;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-import javax.sql.StatementEvent;
 
-import org.codehaus.jackson.map.util.JSONPObject;
-import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 
 public class FullBackupImporter extends FullBackupBase {
@@ -91,6 +81,7 @@ public class FullBackupImporter extends FullBackupBase {
 				count--;
 		}
 
+		// finalizeBackup();
 	}
 
 	private static void processStatement(Exporter exporter, BackupDump dump, SqlStatement statement, Boolean dump_raw) {
@@ -285,12 +276,6 @@ public class FullBackupImporter extends FullBackupBase {
 
 	private static void processAttachment(Exporter exporter, Attachment attachment, BackupRecordInputStream inputStream)
 			throws IOException {
-		if (true) {
-			inputStream.readAttachmentTo(
-					new ByteArrayOutputStream(),
-					attachment.getLength());
-			return;
-		}
 		try {
 			inputStream.readAttachmentTo(
 					exporter.writeOnceStream("raw/attachments", Long.toString(attachment.getAttachmentId())),
@@ -437,7 +422,11 @@ public class FullBackupImporter extends FullBackupBase {
 				byte[] length = new byte[4];
 				StreamUtil.readFully(in, length);
 
-				byte[] frame = new byte[Conversions.byteArrayToInt(length)];
+				int framelen = Conversions.byteArrayToInt(length);
+				if (framelen < 0)
+					throw new AssertionError("Negative frame length: " + framelen + ". Remaining bytes: " + in.available());
+
+				byte[] frame = new byte[framelen];
 				StreamUtil.readFully(in, frame);
 
 				byte[] theirMac = new byte[10];

@@ -5,6 +5,7 @@ build/
 protobuf/*.py
 *.backup
 *.key
+*.sql
 
 # Compiled class file
 *.class
