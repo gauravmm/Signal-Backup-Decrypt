@@ -14,6 +14,7 @@ import securesms.backup.BackupProtos.Sticker;
 import securesms.util.ReactionKey;
 
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -81,10 +82,9 @@ public class FullBackupImporter extends FullBackupBase {
 					count--;
 			}
 
-		} catch (RuntimeException e) {
+		} catch (RuntimeException | IOException e ) {
 			System.err.println(e);
 			System.err.println("Abandoning extraction due to exception, finalizing now...");
-
 		}
 
 		try {
@@ -459,6 +459,9 @@ public class FullBackupImporter extends FullBackupBase {
 			} catch (InvalidKeyException | InvalidAlgorithmParameterException | IllegalBlockSizeException
 					| BadPaddingException e) {
 				throw new AssertionError(e);
+			} catch (EOFException e) {
+				System.err.println("File ended early!");
+				throw new IOException(e);
 			}
 		}
 	}
